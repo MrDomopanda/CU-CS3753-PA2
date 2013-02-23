@@ -13,6 +13,7 @@
  ******************************************************************************/
 
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdio.h>
 /*#include <stdlib.h>*/
 #include <unistd.h>     // Provides usleep
@@ -39,6 +40,7 @@ void* resolver();
 /* Setup Shared/Global Variables */
 FILE* outputfd = NULL;
 queue buffer;
+sem_t full, empty, mutex;
 
 
 int main(int argc, char *argv[])
@@ -70,11 +72,6 @@ int main(int argc, char *argv[])
     pthread_t reqThreads[numRequesterThreads];
     pthread_t resThreads[numResolverThreads];
 
-    /* Initialize Bounded Queue */
-    if (queue_init(&buffer, QUEUE_SIZE) == QUEUE_FAILURE) {
-        fprintf(stderr, "Queue Error: init failed!\n");
-    }
-
     /* Open Output File */
     outputfd = fopen(argv[argc-1], "w");
     if (!outputfd) {
@@ -82,6 +79,16 @@ int main(int argc, char *argv[])
                 argv[argc-1], strerror(errno));
         return ERR_FOPEN;
     }
+
+    /* Initialize Bounded Queue */
+    if (queue_init(&buffer, QUEUE_SIZE) == QUEUE_FAILURE) {
+        fprintf(stderr, "Queue Error: init failed!\n");
+    }
+
+    /* Initialize Semaphores */
+    sem_init(&full, 0, QUEUE_SIZE);
+    sem_init(&empty, 0, 0);
+    sem_init(&mutex, 0, 1);
 
     /* Spawn Requester Threads */
     for (i = 0; i < numRequesterThreads; ++i) {
@@ -154,19 +161,23 @@ void* requester(void* inputFilePath)
             return (void*) ERR_STRNCPY;
         }
 
+        /* Make sure the queue is not full */
+        sem_wait(&full);
+
+        /* Acquire exclusive access to queue so it can be updated safely */
+        sem_wait(&mutex);
+
         /* Add hostname to Bounded Queue */
-        printf("Pushed: %s\n", payload);
         if (queue_push(&buffer, (void*) payload) == QUEUE_FAILURE) {
             fprintf(stderr, "Queue Error: push [%s] failed!\n", payload);
         }
-    }
+        printf("Pushed: %s\n", payload);
 
-    while (!queue_is_empty(&buffer)) {
-        if ((payload = (char*) queue_pop(&buffer)) == NULL) {
-            fprintf(stderr, "Queue Error: pop failed!\n");
-        }
-        printf("Popped: %s\n", payload);
-        free(payload);
+        /* Release exclusive access to queue */
+        sem_post(&mutex);
+
+        /* Notify resolver threads about new hostname in queue */
+        sem_post(&empty);
     }
 
     /* Close Input File */
@@ -184,10 +195,26 @@ void* resolver()
 
     /* Read hostname from Bounded Queue */
     while (!queue_is_empty(&buffer)) {
+        /* Make sure the queue is not empty */
+        sem_wait(&empty);
+
+        /* Acquire exclusive access to queue so it can be read safely */
+        sem_wait(&mutex);
+
+        /* Read hostname from Bounded Queue */
         if ((hostname = (char*) queue_pop(&buffer)) == NULL) {
             fprintf(stderr, "Queue Error: pop failed!\n");
         }
+
+        /* Release exclusive access to queue */
+        sem_post(&mutex);
+
+        /* Notify requester threads that there is more room in queue */
+        sem_post(&full);
+
         printf("Popped: %s\n", hostname);
+
+        /* Free malloc'd Memory */
         free(hostname);
     }
 
