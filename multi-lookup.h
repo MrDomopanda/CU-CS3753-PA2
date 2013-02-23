@@ -18,5 +18,7 @@
 #define ERR_PTHREAD_CREATE  2
 #define ERR_MALLOC          3
 #define ERR_STRNCPY         4
+#define ERR_SEMAPHORE       5
+#define ERR_MUTEX           6
 
 #endif

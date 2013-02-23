@@ -29,7 +29,7 @@
 #define MIN_RESOLVER_THREADS    2       // Mandatory lower-limit
 #define MAX_NAME_LENGTH         256     // Maximum hostname length
 #define INPUTFS                 "%255s"
-#define QUEUE_SIZE              30
+#define QUEUE_SIZE              10
 
 
 /* Prototypes for Local Functions */
@@ -38,9 +38,9 @@ void* resolver();
 
 
 /* Setup Shared/Global Variables */
-FILE* outputfd = NULL;
-queue buffer;
-sem_t full, empty;
+FILE*           outputfd = NULL;
+queue           buffer;
+sem_t           full, empty;
 pthread_mutex_t qmutex, fmutex;
 int reqFinished = 0;
 int resFinished = 0;
@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
     /* Create one requester thread per input file */
     unsigned int numRequesterThreads = argc - 2;
     /* TODO: set numResolverThreads equal to the number of cores available */
-    unsigned int numResolverThreads = 2;
+    unsigned int numResolverThreads = 4;
 
     /* Verify Correct Usage */
     if (argc < MIN_ARGS) {
@@ -88,11 +88,27 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Queue Error: init failed!\n");
     }
 
-    /* Initialize Semaphores */
-    sem_init(&full, 0, QUEUE_SIZE);
-    sem_init(&empty, 0, 0);
-    pthread_mutex_init(&qmutex, NULL);
-    pthread_mutex_init(&fmutex, NULL);
+    /* Initialize Semaphores and Mutexes */
+    if (sem_init(&full, 0, QUEUE_SIZE)) {
+        fprintf(stderr, "Semaphore Error: Error initializing semaphore 'full': %s\n",
+                strerror(errno));
+        return ERR_SEMAPHORE;
+    }
+    if (sem_init(&empty, 0, 0)) {
+        fprintf(stderr, "Semaphore Error: Error initializing semaphore 'full': %s\n",
+                strerror(errno));
+        return ERR_SEMAPHORE;
+    }
+    if (pthread_mutex_init(&qmutex, NULL)) {
+        fprintf(stderr, "Mutex Error: Error initializing mutex 'qmutex': %s\n",
+                strerror(errno));
+        return ERR_MUTEX;
+    }
+    if (pthread_mutex_init(&fmutex, NULL)) {
+        fprintf(stderr, "Mutex Error: Error initializing mutex 'fmutex': %s\n",
+                strerror(errno));
+        return ERR_MUTEX;
+    }
 
     /* Spawn Requester Threads */
     for (i = 0; i < numRequesterThreads; ++i) {
@@ -116,7 +132,6 @@ int main(int argc, char *argv[])
     for (i = 0; i < numRequesterThreads; ++i) {
         pthread_join(reqThreads[i], &status);
         //if (!status) {
-            //print
         //}
     }
 
@@ -130,17 +145,34 @@ int main(int argc, char *argv[])
         pthread_join(resThreads[i], &status);
     }
 
+    printf("FINISHED RESOLVER THREADS\n");
+
     /* Close Output File */
-    fclose(outputfd);
+    if (fclose(outputfd)) {
+        fprintf(stderr, "File Error: Error closing output file [%s]: %s\n",
+                argv[argc-1], strerror(errno));
+    }
 
     /* Cleanup Queue Memory */
     queue_cleanup(&buffer);
 
     /* Cleanup Semaphore Memory */
-    sem_destroy(&full);
-    sem_destroy(&empty);
-    pthread_mutex_destroy(&qmutex);
-    pthread_mutex_destroy(&fmutex);
+    if (sem_destroy(&full)) {
+        fprintf(stderr, "Semaphore Error: Error destroying semaphore 'full': %s\n",
+                strerror(errno));
+    }
+    if (sem_destroy(&empty)) {
+        fprintf(stderr, "Semaphore Error: Error destroying semaphore 'empty': %s\n",
+                strerror(errno));
+    }
+    if (pthread_mutex_destroy(&qmutex)) {
+        fprintf(stderr, "Mutex Error: Error destroying mutex 'qmutex': %s\n",
+                strerror(errno));
+    }
+    if (pthread_mutex_destroy(&fmutex)) {
+        fprintf(stderr, "Mutex Error: Error destroying mutex 'fmutex': %s\n",
+                strerror(errno));
+    }
 
     return EXIT_SUCCESS;
 }
@@ -151,7 +183,6 @@ void* requester(void* inputFilePath)
     FILE* inputfd = NULL;
     char hostname[MAX_NAME_LENGTH];
     char* payload;
-
 
     /* Open Input File */
     inputfd = fopen((char*) inputFilePath, "r");
@@ -196,7 +227,10 @@ void* requester(void* inputFilePath)
     }
 
     /* Close Input File */
-    fclose(inputfd);
+    if (fclose(inputfd)) {
+        fprintf(stderr, "File Error: Error closing input file [%s]: %s\n",
+                (char*) inputFilePath, strerror(errno));
+    }
 
     return NULL;
 }
@@ -219,10 +253,6 @@ void* resolver()
         /* Read hostname from Bounded Queue */
         if ((hostname = (char*) queue_pop(&buffer)) == NULL) {
             fprintf(stderr, "Queue Error: pop failed!\n");
-        }
-        if (reqFinished && queue_is_empty(&buffer)) {
-            printf("RESOLVER THREADS FINISHED\n");
-            resFinished = 1;
         }
 
         /* Release exclusive access to queue */
@@ -255,6 +285,9 @@ void* resolver()
         pthread_mutex_lock(&qmutex);
     }
     pthread_mutex_unlock(&qmutex);
+
+    printf("RESOLVER THREAD FINISHED\n");
+    resFinished = 1;
 
     return NULL;
 }
