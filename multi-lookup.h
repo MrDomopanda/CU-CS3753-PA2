@@ -16,5 +16,7 @@
 #define ERR_ARGS            -1
 #define ERR_FOPEN           1
 #define ERR_PTHREAD_CREATE  2
+#define ERR_MALLOC          3
+#define ERR_STRNCPY         4
 
 #endif

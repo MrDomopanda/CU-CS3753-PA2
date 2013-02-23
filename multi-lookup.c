@@ -15,7 +15,7 @@
 #include <pthread.h>
 #include <stdio.h>
 /*#include <stdlib.h>*/
-/*#include <unistd.h>*/
+#include <unistd.h>     // Provides usleep
 
 #include "multi-lookup.h"
 #include "queue.h"
@@ -33,6 +33,7 @@
 
 /* Prototypes for Local Functions */
 void* requester(void* inputFilePath);
+void* resolver();
 
 
 /* Setup Shared/Global Variables */
@@ -43,6 +44,7 @@ queue buffer;
 int main(int argc, char *argv[])
 {
     /* Setup Local Variables */
+    unsigned int i;
     int rc;             // Return code from pthread_create() call
     void* status = 0;   // Return value from thread from pthread_join() call
     /* Create one requester thread per input file */
@@ -74,32 +76,49 @@ int main(int argc, char *argv[])
     }
 
     /* Open Output File */
-    outputfd = fopen(argv[(argc-1)], "w");
+    outputfd = fopen(argv[argc-1], "w");
     if (!outputfd) {
         fprintf(stderr, "File Error: Error opening output file [%s]: %s\n",
-                argv[(argc-1)], strerror(errno));
+                argv[argc-1], strerror(errno));
         return ERR_FOPEN;
     }
 
     /* Spawn Requester Threads */
-    rc = pthread_create(&(reqThreads[0]), NULL, requester, argv[1]);
-    if (rc) {
-        fprintf(stderr, "Pthread Error: Return code from pthread_create() is %d\n", rc);
-        return ERR_PTHREAD_CREATE;
+    for (i = 0; i < numRequesterThreads; ++i) {
+        rc = pthread_create(&reqThreads[i], NULL, requester, argv[i+1]);
+        if (rc) {
+            fprintf(stderr, "Pthread Error: Return code from pthread_create() is %d\n", rc);
+            return ERR_PTHREAD_CREATE;
+        }
     }
 
     /* Spawn Resolver Threads */
+    for (i = 0; i < numResolverThreads; ++i) {
+        rc = pthread_create(&resThreads[i], NULL, resolver, NULL);
+        if (rc) {
+            fprintf(stderr, "Pthread Error: Return code from pthread_create() is %d\n", rc);
+            return ERR_PTHREAD_CREATE;
+        }
+    }
 
     /* Wait for All Requester Threads to Finish */
-    pthread_join(reqThreads[0], &status);
-    //if (!status) {
-        //print
-    //}
+    for (i = 0; i < numRequesterThreads; ++i) {
+        pthread_join(reqThreads[i], &status);
+        //if (!status) {
+            //print
+        //}
+    }
 
     /* Wait for All Resolver Threads to Finish */
+    for (i = 0; i < numResolverThreads; ++i) {
+        pthread_join(resThreads[i], &status);
+    }
 
     /* Close Output File */
     fclose(outputfd);
+
+    /* Cleanup Queue Memory */
+    queue_cleanup(&buffer);
 
     return EXIT_SUCCESS;
 }
@@ -109,7 +128,8 @@ void* requester(void* inputFilePath)
 {
     FILE* inputfd = NULL;
     char hostname[MAX_NAME_LENGTH];
-    char* temp;
+    char* payload;
+
 
     /* Open Input File */
     inputfd = fopen((char*) inputFilePath, "r");
@@ -121,11 +141,32 @@ void* requester(void* inputFilePath)
 
     /* Read File and Process */
     while (fscanf(inputfd, INPUTFS, hostname) > 0) {
-        /* Add hostname to Bounded Queue */
-        printf("Pushed: %s\n", hostname);
-        if (queue_push(&buffer, (void*) hostname) == QUEUE_FAILURE) {
-            fprintf(stderr, "Queue Error: push [%s] failed!\n", hostname);
+        /* Must make a copy of the hostname to be placed in the queue;
+         * otherwise, the queue will be full of pointers to hostname */
+        if ((payload = (char*) malloc(sizeof(hostname))) == NULL) {
+            fprintf(stderr, "Malloc Error: Error allocating memory for payload [%s]: %s\n",
+                    hostname, strerror(errno));
+            return (void*) ERR_MALLOC;
         }
+        if (strncpy(payload, hostname, MAX_NAME_LENGTH) != payload) {
+            fprintf(stderr, "Strncpy Error: Error copying string [%s]\n",
+                    hostname);
+            return (void*) ERR_STRNCPY;
+        }
+
+        /* Add hostname to Bounded Queue */
+        printf("Pushed: %s\n", payload);
+        if (queue_push(&buffer, (void*) payload) == QUEUE_FAILURE) {
+            fprintf(stderr, "Queue Error: push [%s] failed!\n", payload);
+        }
+    }
+
+    while (!queue_is_empty(&buffer)) {
+        if ((payload = (char*) queue_pop(&buffer)) == NULL) {
+            fprintf(stderr, "Queue Error: pop failed!\n");
+        }
+        printf("Popped: %s\n", payload);
+        free(payload);
     }
 
     /* Close Input File */
@@ -135,15 +176,21 @@ void* requester(void* inputFilePath)
 }
 
 
-void* resolver(void)
+void* resolver()
 {
+    return NULL;
     char* hostname;
     char firstipstr[INET6_ADDRSTRLEN];
 
     /* Read hostname from Bounded Queue */
-    if ((hostname = queue_pop(&buffer)) == NULL) {
-        fprintf(stderr, "Queue Error: pop failed!\n");
+    while (!queue_is_empty(&buffer)) {
+        if ((hostname = (char*) queue_pop(&buffer)) == NULL) {
+            fprintf(stderr, "Queue Error: pop failed!\n");
+        }
+        printf("Popped: %s\n", hostname);
+        free(hostname);
     }
-    printf("Popped: %s\n\n", hostname);
+
+    return NULL;
 }
 
