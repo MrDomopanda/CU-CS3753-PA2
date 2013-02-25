@@ -12,38 +12,19 @@
  *
  ******************************************************************************/
 
-#include <pthread.h>
-#include <semaphore.h>
-#include <stdio.h>
-/*#include <stdlib.h>*/
-#include <unistd.h>     // Provides usleep
 
+/* Local Includes */
 #include "multi-lookup.h"
 #include "queue.h"
 #include "util.h"
 
 
-/* Requires: <exe_name> <input_file>+ <results_file> */
-#define MIN_ARGS                3
-#define USAGE                   "<inputFilePath> [inputFilePath...] <outputFilePath>"
-#define MIN_RESOLVER_THREADS    2       // Mandatory lower-limit
-#define MAX_NAME_LENGTH         256     // Maximum hostname length
-#define INPUTFS                 "%255s"
-#define QUEUE_SIZE              10
-
-
-/* Prototypes for Local Functions */
-void* requester(void* inputFilePath);
-void* resolver();
-
-
 /* Setup Shared/Global Variables */
 FILE*           outputfd = NULL;
+int             reqFinished = 0;
 queue           buffer;
 sem_t           full, empty;
 pthread_mutex_t qmutex, fmutex;
-int reqFinished = 0;
-int resFinished = 0;
 
 
 int main(int argc, char *argv[])
@@ -55,18 +36,18 @@ int main(int argc, char *argv[])
     /* Create one requester thread per input file */
     unsigned int numRequesterThreads = argc - 2;
     /* TODO: set numResolverThreads equal to the number of cores available */
-    unsigned int numResolverThreads = 4;
+    unsigned int numResolverThreads = sysconf( _SC_NPROCESSORS_ONLN );
 
     /* Verify Correct Usage */
     if (argc < MIN_ARGS) {
-        fprintf(stderr, "Usage Error: Not enough arguments: %d\n", (argc - 1));
+        fprintf(stderr, "USAGE ERROR: Not enough arguments: %d\n", (argc - 1));
         fprintf(stderr, "Usage:\n  %s %s\n", argv[0], USAGE);
         return ERR_ARGS;
     }
 
     /* Verify Minimum Resolver Thread Limit */
     if (numResolverThreads < MIN_RESOLVER_THREADS) {
-        fprintf(stderr, "Warning: Program must provide at least %d resolver threads",
+        fprintf(stderr, "WARNING: Program must provide at least %d resolver threads",
                 MIN_RESOLVER_THREADS);
         numResolverThreads = 2;
     }
@@ -78,34 +59,34 @@ int main(int argc, char *argv[])
     /* Open Output File */
     outputfd = fopen(argv[argc-1], "w");
     if (!outputfd) {
-        fprintf(stderr, "File Error: Error opening output file [%s]: %s\n",
+        fprintf(stderr, "FILE ERROR: Error opening output file [%s]: %s\n",
                 argv[argc-1], strerror(errno));
         return ERR_FOPEN;
     }
 
     /* Initialize Bounded Queue */
     if (queue_init(&buffer, QUEUE_SIZE) == QUEUE_FAILURE) {
-        fprintf(stderr, "Queue Error: init failed!\n");
+        fprintf(stderr, "QUEUE ERROR: init failed!\n");
     }
 
     /* Initialize Semaphores and Mutexes */
     if (sem_init(&full, 0, QUEUE_SIZE)) {
-        fprintf(stderr, "Semaphore Error: Error initializing semaphore 'full': %s\n",
+        fprintf(stderr, "SEMAPHORE ERROR: Error initializing semaphore 'full': %s\n",
                 strerror(errno));
         return ERR_SEMAPHORE;
     }
     if (sem_init(&empty, 0, 0)) {
-        fprintf(stderr, "Semaphore Error: Error initializing semaphore 'full': %s\n",
+        fprintf(stderr, "SEMAPHORE ERROR: Error initializing semaphore 'full': %s\n",
                 strerror(errno));
         return ERR_SEMAPHORE;
     }
     if (pthread_mutex_init(&qmutex, NULL)) {
-        fprintf(stderr, "Mutex Error: Error initializing mutex 'qmutex': %s\n",
+        fprintf(stderr, "MUTEX ERROR: Error initializing mutex 'qmutex': %s\n",
                 strerror(errno));
         return ERR_MUTEX;
     }
     if (pthread_mutex_init(&fmutex, NULL)) {
-        fprintf(stderr, "Mutex Error: Error initializing mutex 'fmutex': %s\n",
+        fprintf(stderr, "MUTEX ERROR: Error initializing mutex 'fmutex': %s\n",
                 strerror(errno));
         return ERR_MUTEX;
     }
@@ -114,7 +95,7 @@ int main(int argc, char *argv[])
     for (i = 0; i < numRequesterThreads; ++i) {
         rc = pthread_create(&reqThreads[i], NULL, requester, argv[i+1]);
         if (rc) {
-            fprintf(stderr, "Pthread Error: Return code from pthread_create() is %d\n", rc);
+            fprintf(stderr, "PTHREAD ERROR: Return code from pthread_create() is %d\n", rc);
             return ERR_PTHREAD_CREATE;
         }
     }
@@ -123,7 +104,7 @@ int main(int argc, char *argv[])
     for (i = 0; i < numResolverThreads; ++i) {
         rc = pthread_create(&resThreads[i], NULL, resolver, NULL);
         if (rc) {
-            fprintf(stderr, "Pthread Error: Return code from pthread_create() is %d\n", rc);
+            fprintf(stderr, "PTHREAD ERROR: Return code from pthread_create() is %d\n", rc);
             return ERR_PTHREAD_CREATE;
         }
     }
@@ -131,25 +112,29 @@ int main(int argc, char *argv[])
     /* Wait for All Requester Threads to Finish */
     for (i = 0; i < numRequesterThreads; ++i) {
         pthread_join(reqThreads[i], &status);
+        printf("REQUESTER THREAD #%d FINISHED\n", i+1);
         //if (!status) {
         //}
     }
 
-    printf("FINISHED REQUESTER THREADS\n");
+    printf("FINISHED ALL REQUESTER THREADS\n");
 
-    /* Notify resolver threads that all hostnames have be read in */
+    /* Notify resolver threads that all requester threads are finished */
+    pthread_mutex_lock(&qmutex);
     reqFinished = 1;
+    pthread_mutex_unlock(&qmutex);
 
     /* Wait for All Resolver Threads to Finish */
     for (i = 0; i < numResolverThreads; ++i) {
         pthread_join(resThreads[i], &status);
+        printf("RESOLVER THREAD #%d FINISHED\n", i+1);
     }
 
-    printf("FINISHED RESOLVER THREADS\n");
+    printf("FINISHED ALL RESOLVER THREADS\n");
 
     /* Close Output File */
     if (fclose(outputfd)) {
-        fprintf(stderr, "File Error: Error closing output file [%s]: %s\n",
+        fprintf(stderr, "FILE ERROR: Error closing output file [%s]: %s\n",
                 argv[argc-1], strerror(errno));
     }
 
@@ -158,19 +143,19 @@ int main(int argc, char *argv[])
 
     /* Cleanup Semaphore Memory */
     if (sem_destroy(&full)) {
-        fprintf(stderr, "Semaphore Error: Error destroying semaphore 'full': %s\n",
+        fprintf(stderr, "SEMAPHORE ERROR: Error destroying semaphore 'full': %s\n",
                 strerror(errno));
     }
     if (sem_destroy(&empty)) {
-        fprintf(stderr, "Semaphore Error: Error destroying semaphore 'empty': %s\n",
+        fprintf(stderr, "SEMAPHORE ERROR: Error destroying semaphore 'empty': %s\n",
                 strerror(errno));
     }
     if (pthread_mutex_destroy(&qmutex)) {
-        fprintf(stderr, "Mutex Error: Error destroying mutex 'qmutex': %s\n",
+        fprintf(stderr, "MUTEX ERROR: Error destroying mutex 'qmutex': %s\n",
                 strerror(errno));
     }
     if (pthread_mutex_destroy(&fmutex)) {
-        fprintf(stderr, "Mutex Error: Error destroying mutex 'fmutex': %s\n",
+        fprintf(stderr, "MUTEX ERROR: Error destroying mutex 'fmutex': %s\n",
                 strerror(errno));
     }
 
@@ -181,13 +166,13 @@ int main(int argc, char *argv[])
 void* requester(void* inputFilePath)
 {
     FILE* inputfd = NULL;
-    char hostname[MAX_NAME_LENGTH];
     char* payload;
+    char hostname[MAX_NAME_LENGTH];
 
     /* Open Input File */
     inputfd = fopen((char*) inputFilePath, "r");
     if (!inputfd) {
-        fprintf(stderr, "File Error: Error opening input file [%s]: %s\n",
+        fprintf(stderr, "FILE ERROR: Error opening input file [%s]: %s\n",
                 (char*) inputFilePath, strerror(errno));
         return (void*) ERR_FOPEN;
     }
@@ -197,17 +182,20 @@ void* requester(void* inputFilePath)
         /* Must make a copy of the hostname to be placed in the queue;
          * otherwise, the queue will be full of pointers to hostname */
         if ((payload = (char*) malloc(sizeof(hostname))) == NULL) {
-            fprintf(stderr, "Malloc Error: Error allocating memory for payload [%s]: %s\n",
+            fprintf(stderr, "MALLOC ERROR: Error allocating memory for payload [%s]: %s\n",
                     hostname, strerror(errno));
             return (void*) ERR_MALLOC;
         }
         if (strncpy(payload, hostname, MAX_NAME_LENGTH) != payload) {
-            fprintf(stderr, "Strncpy Error: Error copying string [%s]\n",
+            fprintf(stderr, "STRNCPY ERROR: Error copying string [%s]\n",
                     hostname);
             return (void*) ERR_STRNCPY;
         }
 
         /* Make sure the queue is not full */
+        /* TODO: Should this instead just check the value of some count and sleep if necessary?
+         *       See section 2.2 of the assignment PDF
+         */
         sem_wait(&full);
 
         /* Acquire exclusive access to queue so it can be updated safely */
@@ -215,20 +203,21 @@ void* requester(void* inputFilePath)
 
         /* Add hostname to Bounded Queue */
         if (queue_push(&buffer, (void*) payload) == QUEUE_FAILURE) {
-            fprintf(stderr, "Queue Error: push [%s] failed!\n", payload);
+            fprintf(stderr, "QUEUE ERROR: push [%s] failed!\n", payload);
         }
-        printf("Pushed: %s\n", payload);
 
         /* Release exclusive access to queue */
         pthread_mutex_unlock(&qmutex);
 
         /* Notify resolver threads about new hostname in queue */
         sem_post(&empty);
+
+        printf("Pushed: %s\n", payload);
     }
 
     /* Close Input File */
     if (fclose(inputfd)) {
-        fprintf(stderr, "File Error: Error closing input file [%s]: %s\n",
+        fprintf(stderr, "FILE ERROR: Error closing input file [%s]: %s\n",
                 (char*) inputFilePath, strerror(errno));
     }
 
@@ -244,6 +233,7 @@ void* resolver()
     pthread_mutex_lock(&qmutex);
     while (!(reqFinished && queue_is_empty(&buffer))) {
         pthread_mutex_unlock(&qmutex);
+
         /* Wait for queue to not be empty */
         sem_wait(&empty);
 
@@ -252,7 +242,7 @@ void* resolver()
 
         /* Read hostname from Bounded Queue */
         if ((hostname = (char*) queue_pop(&buffer)) == NULL) {
-            fprintf(stderr, "Queue Error: pop failed!\n");
+            fprintf(stderr, "QUEUE ERROR: pop failed!\n");
         }
 
         /* Release exclusive access to queue */
@@ -266,7 +256,7 @@ void* resolver()
         /* Lookup hostname and get IP string */
         if (dnslookup(hostname, resolvedIP, sizeof(resolvedIP))
                 == UTIL_FAILURE) {
-            fprintf(stderr, "DNSlookup Error: %s\n", hostname);
+            fprintf(stderr, "DNSLOOKUP ERROR: %s\n", hostname);
             strncpy(resolvedIP, "", sizeof(resolvedIP));
         }
 
@@ -286,9 +276,5 @@ void* resolver()
     }
     pthread_mutex_unlock(&qmutex);
 
-    printf("RESOLVER THREAD FINISHED\n");
-    resFinished = 1;
-
     return NULL;
 }
-
