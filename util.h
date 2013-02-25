@@ -5,9 +5,9 @@
  * Create Date: 2012/02/01
  * Modify Date: 2012/02/01
  * Description:
- * 	This file contains declarations of utility functions for
+ *     This file contains declarations of utility functions for
  *      Programming Assignment 2.
- *  
+ *
  */
 
 #ifndef UTIL_H
@@ -34,7 +34,7 @@
  * firstIPstr of size maxsize
  */
 int dnslookup(const char* hostname,
-	      char* firstIPstr,
-	      int maxSize);
+          char* firstIPstr,
+          int maxSize);
 
 #endif

@@ -12,12 +12,9 @@
  *
  ******************************************************************************/
 
-
-/* Local Includes */
 #include "multi-lookup.h"
-#include "queue.h"
-#include "util.h"
 
+//#define LOOKUP_DEBUG
 
 /* Setup Shared/Global Variables */
 FILE*           outputfd = NULL;
@@ -112,12 +109,16 @@ int main(int argc, char *argv[])
     /* Wait for All Requester Threads to Finish */
     for (i = 0; i < numRequesterThreads; ++i) {
         pthread_join(reqThreads[i], &status);
+#ifdef LOOKUP_DEBUG
         printf("REQUESTER THREAD #%d FINISHED\n", i+1);
+#endif
         //if (!status) {
         //}
     }
 
+#ifdef LOOKUP_DEBUG
     printf("FINISHED ALL REQUESTER THREADS\n");
+#endif
 
     /* Notify resolver threads that all requester threads are finished */
     pthread_mutex_lock(&qmutex);
@@ -127,10 +128,14 @@ int main(int argc, char *argv[])
     /* Wait for All Resolver Threads to Finish */
     for (i = 0; i < numResolverThreads; ++i) {
         pthread_join(resThreads[i], &status);
+#ifdef LOOKUP_DEBUG
         printf("RESOLVER THREAD #%d FINISHED\n", i+1);
+#endif
     }
 
+#ifdef LOOKUP_DEBUG
     printf("FINISHED ALL RESOLVER THREADS\n");
+#endif
 
     /* Close Output File */
     if (fclose(outputfd)) {
@@ -212,7 +217,9 @@ void* requester(void* inputFilePath)
         /* Notify resolver threads about new hostname in queue */
         sem_post(&empty);
 
+#ifdef LOOKUP_DEBUG
         printf("Pushed: %s\n", payload);
+#endif
     }
 
     /* Close Input File */
@@ -251,7 +258,9 @@ void* resolver()
         /* Notify requester threads that there is more room in queue */
         sem_post(&full);
 
+#ifdef LOOKUP_DEBUG
         printf("Popped: %s\n", hostname);
+#endif
 
         /* Lookup hostname and get IP string */
         if (dnslookup(hostname, resolvedIP, sizeof(resolvedIP))

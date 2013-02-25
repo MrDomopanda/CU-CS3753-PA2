@@ -17,8 +17,13 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdio.h>
-/*#include <stdlib.h>*/
+//#include <stdlib.h>
 #include <unistd.h>     // Provides usleep, num cores
+
+
+/* Local Includes */
+#include "queue.h"
+#include "util.h"
 
 
 /* Error code defines */
