@@ -5,5 +5,5 @@ Skype username: sthock1821
 
 --------------------------
 
-valgrind --leak-check=full --show-reachable=yes ./multi-lookup input/names*.txt results.txt
+valgrind --leak-check=full --show-reachable=yes ./multi-lookup grading_input/names*.txt results.txt
 

@@ -20,7 +20,7 @@
 FILE*           outputfd = NULL;
 int             reqRunning;
 queue           buffer;
-sem_t           full, empty;
+sem_t           full, empty, resBegin;
 pthread_mutex_t qmutex, fmutex;
 
 
@@ -74,7 +74,12 @@ int main(int argc, char *argv[])
         return ERR_SEMAPHORE;
     }
     if (sem_init(&empty, 0, 0)) {
-        fprintf(stderr, "SEMAPHORE ERROR: Error initializing semaphore 'full': %s\n",
+        fprintf(stderr, "SEMAPHORE ERROR: Error initializing semaphore 'empty': %s\n",
+                strerror(errno));
+        return ERR_SEMAPHORE;
+    }
+    if (sem_init(&resBegin, 0, 0)) {
+        fprintf(stderr, "SEMAPHORE ERROR: Error initializing semaphore 'resBegin': %s\n",
                 strerror(errno));
         return ERR_SEMAPHORE;
     }
@@ -115,6 +120,9 @@ int main(int argc, char *argv[])
 #endif
     }
 
+    /* In case all input files were bogus, notify resolver threads to stop sleeping */
+    sem_post(&resBegin);
+
 #ifdef LOOKUP_DEBUG
     printf("FINISHED ALL REQUESTER THREADS\n");
 #endif
@@ -149,6 +157,10 @@ int main(int argc, char *argv[])
         fprintf(stderr, "SEMAPHORE ERROR: Error destroying semaphore 'empty': %s\n",
                 strerror(errno));
     }
+    if (sem_destroy(&resBegin)) {
+        fprintf(stderr, "SEMAPHORE ERROR: Error destroying semaphore 'resBegin': %s\n",
+                strerror(errno));
+    }
     if (pthread_mutex_destroy(&qmutex)) {
         fprintf(stderr, "MUTEX ERROR: Error destroying mutex 'qmutex': %s\n",
                 strerror(errno));
@@ -181,6 +193,9 @@ void* requester(void* inputFilePath)
 
         return (void*) ERR_FOPEN;
     }
+
+    /* Notify resolver threads that at least one input file has been opened (is not bogus) */
+    sem_post(&resBegin);
 
     /* Read File and Process */
     while (fscanf(inputfd, INPUTFS, hostname) > 0) {
@@ -251,6 +266,13 @@ void* resolver()
     char* hostname;
     char resolvedIP[INET6_ADDRSTRLEN];
 
+    /* Wait for at least one input file to be opened (non bogus)
+     * and notify all other sleeping resolver threads of the same
+     */
+    sem_wait(&resBegin);
+    sem_post(&resBegin);
+
+    /* Lock while checking reqRunning and queue */
     pthread_mutex_lock(&qmutex);
     while (reqRunning || !queue_is_empty(&buffer)) {
         pthread_mutex_unlock(&qmutex);
@@ -295,6 +317,7 @@ void* resolver()
         /* Free malloc'd Memory */
         free(hostname);
 
+        /* Acquire lock to check WHILE condition */
         pthread_mutex_lock(&qmutex);
     }
     pthread_mutex_unlock(&qmutex);
