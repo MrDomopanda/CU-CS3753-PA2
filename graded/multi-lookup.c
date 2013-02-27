@@ -173,6 +173,12 @@ void* requester(void* inputFilePath)
     if (!inputfd) {
         fprintf(stderr, "FILE ERROR: Error opening input file [%s]: %s\n",
                 (char*) inputFilePath, strerror(errno));
+
+        /* Notify resolver threads that a requester thread has finished */
+        pthread_mutex_lock(&qmutex);
+        reqRunning--;
+        pthread_mutex_unlock(&qmutex);
+
         return (void*) ERR_FOPEN;
     }
 
@@ -183,11 +189,23 @@ void* requester(void* inputFilePath)
         if ((payload = (char*) malloc(sizeof(hostname))) == NULL) {
             fprintf(stderr, "MALLOC ERROR: Error allocating memory for payload [%s]: %s\n",
                     hostname, strerror(errno));
+
+            /* Notify resolver threads that a requester thread has finished */
+            pthread_mutex_lock(&qmutex);
+            reqRunning--;
+            pthread_mutex_unlock(&qmutex);
+
             return (void*) ERR_MALLOC;
         }
         if (strncpy(payload, hostname, MAX_NAME_LENGTH) != payload) {
             fprintf(stderr, "STRNCPY ERROR: Error copying string [%s]\n",
                     hostname);
+
+            /* Notify resolver threads that a requester thread has finished */
+            pthread_mutex_lock(&qmutex);
+            reqRunning--;
+            pthread_mutex_unlock(&qmutex);
+
             return (void*) ERR_STRNCPY;
         }
 

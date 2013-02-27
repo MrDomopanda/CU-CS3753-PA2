@@ -1,3 +1,9 @@
+Stephen Bennett
+bennetsr@colorado.edu
+(612) 360-1129
+Skype username: sthock1821
+
+--------------------------
 
 valgrind --leak-check=full --show-reachable=yes ./multi-lookup input/names*.txt results.txt
 
