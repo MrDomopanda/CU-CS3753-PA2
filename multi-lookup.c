@@ -18,7 +18,7 @@
 
 /* Setup Shared/Global Variables */
 FILE*           outputfd = NULL;
-int             reqFinished = 0;
+int             reqRunning;
 queue           buffer;
 sem_t           full, empty;
 pthread_mutex_t qmutex, fmutex;
@@ -32,7 +32,8 @@ int main(int argc, char *argv[])
     void* status = 0;   // Return value from thread from pthread_join() call
     /* Create one requester thread per input file */
     unsigned int numRequesterThreads = argc - 2;
-    /* TODO: set numResolverThreads equal to the number of cores available */
+    reqRunning = numRequesterThreads;
+    /* Create as many resolver threads as cores */
     unsigned int numResolverThreads = sysconf( _SC_NPROCESSORS_ONLN );
 
     /* Verify Correct Usage */
@@ -112,18 +113,11 @@ int main(int argc, char *argv[])
 #ifdef LOOKUP_DEBUG
         printf("REQUESTER THREAD #%d FINISHED\n", i+1);
 #endif
-        //if (!status) {
-        //}
     }
 
 #ifdef LOOKUP_DEBUG
     printf("FINISHED ALL REQUESTER THREADS\n");
 #endif
-
-    /* Notify resolver threads that all requester threads are finished */
-    pthread_mutex_lock(&qmutex);
-    reqFinished = 1;
-    pthread_mutex_unlock(&qmutex);
 
     /* Wait for All Resolver Threads to Finish */
     for (i = 0; i < numResolverThreads; ++i) {
@@ -198,9 +192,6 @@ void* requester(void* inputFilePath)
         }
 
         /* Make sure the queue is not full */
-        /* TODO: Should this instead just check the value of some count and sleep if necessary?
-         *       See section 2.2 of the assignment PDF
-         */
         sem_wait(&full);
 
         /* Acquire exclusive access to queue so it can be updated safely */
@@ -228,6 +219,11 @@ void* requester(void* inputFilePath)
                 (char*) inputFilePath, strerror(errno));
     }
 
+    /* Notify resolver threads that a requester thread has finished */
+    pthread_mutex_lock(&qmutex);
+    reqRunning--;
+    pthread_mutex_unlock(&qmutex);
+
     return NULL;
 }
 
@@ -238,7 +234,7 @@ void* resolver()
     char resolvedIP[INET6_ADDRSTRLEN];
 
     pthread_mutex_lock(&qmutex);
-    while (!(reqFinished && queue_is_empty(&buffer))) {
+    while (reqRunning || !queue_is_empty(&buffer)) {
         pthread_mutex_unlock(&qmutex);
 
         /* Wait for queue to not be empty */
