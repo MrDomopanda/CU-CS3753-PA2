@@ -7,21 +7,30 @@
  * DESCRIPTION:
  *  A multi-threaded application that resolves domain names to IP addresses.
  *  The application is composed of two sub-systems, each with one thread pool:
- *  requesters and resolvers. The sub-systems communicate with each other using
+ *  requesters and resolvers.
+ *  The number of requester threads spawned is based on the number of input
+ *  files given.
+ *  The number of resolver threads spawned is based dynamically on the number
+ *  of cores available on the machine running the executable.
+ *  The two sub-systems communicate with each other using
  *  a bounded queue.
  *
  ******************************************************************************/
 
 #include "multi-lookup.h"
 
+/* Uncomment the following line to enable debugging output */
 //#define LOOKUP_DEBUG
 
 /* Setup Shared/Global Variables */
 FILE*           outputfd = NULL;
-int             reqRunning;
-queue           buffer;
-sem_t           full, empty, resBegin;
-pthread_mutex_t qmutex, fmutex;
+int             reqRunning; // Flag to notify resolvers when all requesters done
+queue           buffer;     // Shared buffer
+sem_t           full,       // Synch, requesters wait if queue full
+                empty,      // Synch, resolvers wait if queue empty
+                resBegin;   // Synch, requesters notify resolvers to begin
+pthread_mutex_t qmutex,     // Mutex for queue
+                fmutex;     // Mutex for output file
 
 
 int main(int argc, char *argv[])

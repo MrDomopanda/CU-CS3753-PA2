@@ -5,5 +5,38 @@ Skype username: sthock1821
 
 --------------------------
 
-valgrind --leak-check=full --show-reachable=yes ./multi-lookup grading_input/names*.txt results.txt
+=== FOLDERS ===
+grading_input :: names*.txt input files
+input :: names*.txt input files
+
+
+=== EXECUTABLES ===
+multi-lookup :: A threaded DNS query-er
+
+
+=== BUILDING THE PROGRAM ===
+
+The multi-lookup executable is built using the provided Makefile.
+Run either of the following commands:
+>> make
+>> make multi-lookup
+
+To clean up the working directory (remove all object files, multi-lookup executable, results.txt)
+run the following command:
+>> make clean
+
+
+=== RUNNING THE PROGRAM ===
+
+Usage:
+>> ./multi-lookup <inputFilePath> [inputFilePath...] <outputFilePath>
+
+Example Usage:
+>> ./multi-lookup grading_input/names*.txt results.txt
+
+
+=== CHECKING FOR MEMORY LEAKS ===
+
+The following command uses the valgrind tool to verify there are no memory leaks:
+>> valgrind --leak-check=full --show-reachable=yes ./multi-lookup grading_input/names*.txt results.txt
 
