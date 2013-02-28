@@ -233,6 +233,9 @@ void* requester(void* inputFilePath)
             return (void*) ERR_STRNCPY;
         }
 
+        /* Sleep for 0 to 100 microseconds - as per Section 2.2 of handout */
+        usleep(rand() % 100);
+
         /* Make sure the queue is not full */
         sem_wait(&full);
 
@@ -276,7 +279,7 @@ void* resolver()
     char resolvedIP[INET6_ADDRSTRLEN];
 
     /* Wait for at least one input file to be opened (non bogus)
-     * and notify all other sleeping resolver threads of the same
+     * and notify other sleeping resolver threads of the same
      */
     sem_wait(&resBegin);
     sem_post(&resBegin);

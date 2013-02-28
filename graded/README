@@ -39,4 +39,3 @@ Example Usage:
 
 The following command uses the valgrind tool to verify there are no memory leaks:
 >> valgrind --leak-check=full --show-reachable=yes ./multi-lookup grading_input/names*.txt results.txt
-
